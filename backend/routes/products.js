@@ -96,9 +96,11 @@ router.get("/", async (req, res) => {
 
 /*
   POST /api/products
-  Create product
+  Create product + initial inventory record
 */
 router.post("/", async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const { product_id, name, category, supplier, price, stock, reorderLevel } =
       req.body;
@@ -118,7 +120,13 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const result = await pool.query(
+    await client.query("BEGIN");
+
+    /*
+      1. Insert product into products table
+    */
+
+    const productResult = await client.query(
       `
       INSERT INTO public.products
         (
@@ -153,7 +161,77 @@ router.post("/", async (req, res) => {
       ],
     );
 
-    const product = result.rows[0];
+    const product = productResult.rows[0];
+
+    /*
+      2. Create initial inventory record
+
+      New products are initially assigned to S001.
+
+      IMPORTANT:
+      Use the latest date already present in the dataset.
+      This prevents CURRENT_TIMESTAMP from changing the
+      dashboard's reference date.
+    */
+
+    const inventoryResult = await client.query(
+      `
+      INSERT INTO public.inventory_records
+        (
+          record_id,
+          date,
+          store_id,
+          product_id,
+          category,
+          inventory_level,
+          units_sold,
+          units_ordered,
+          price,
+          discount,
+          weather_condition,
+          promotion,
+          competitor_pricing,
+          seasonality,
+          epidemic,
+          demand
+        )
+      VALUES
+        (
+          (
+            SELECT COALESCE(MAX(record_id), 0) + 1
+            FROM public.inventory_records
+          ),
+          (
+            SELECT MAX(date)::date
+            FROM public.inventory_records
+          ),
+          'S001',
+          $1,
+          $2,
+          $3,
+          0,
+          0,
+          $4,
+          0,
+          'Unknown',
+          0,
+          $4,
+          'Unknown',
+          0,
+          $5
+        )
+      RETURNING record_id
+      `,
+      [
+        product.product_id,
+        product.category,
+        Number(product.stock),
+        Number(product.price),
+        Number(product.reorder_level),
+      ],
+    );
+
+    await client.query("COMMIT");
 
     res.status(201).json({
       success: true,
@@ -167,10 +245,16 @@ router.post("/", async (req, res) => {
         price: Number(product.price),
         stock: Number(product.stock),
         reorderLevel: Number(product.reorder_level),
-        canDelete: true,
+
+        // Product is now referenced by inventory_records
+        canDelete: false,
+
+        inventory_record_id: inventoryResult.rows[0].record_id,
       },
     });
   } catch (error) {
+    await client.query("ROLLBACK");
+
     console.error("Products POST error:", error);
 
     if (error.code === "23505") {
@@ -185,6 +269,8 @@ router.post("/", async (req, res) => {
       message: "Failed to create product",
       error: error.message,
     });
+  } finally {
+    client.release();
   }
 });
 
