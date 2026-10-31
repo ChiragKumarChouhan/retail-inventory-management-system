@@ -61,8 +61,13 @@ export default function Inventory() {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
-  // Server-side filters
+  // Search input
   const [search, setSearch] = useState("");
+
+  // Debounced search value
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // Server-side filters
   const [category, setCategory] = useState("All");
   const [storeId, setStoreId] = useState("All");
 
@@ -78,6 +83,20 @@ export default function Inventory() {
   const [error, setError] = useState("");
 
   // --------------------------------------------------
+  // Debounce search
+  // --------------------------------------------------
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 400);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [search]);
+
+  // --------------------------------------------------
   // Fetch real PostgreSQL data
   // --------------------------------------------------
 
@@ -90,7 +109,7 @@ export default function Inventory() {
         const result = await getInventory({
           page,
           limit,
-          search,
+          search: debouncedSearch,
           category,
           storeId,
         });
@@ -122,7 +141,7 @@ export default function Inventory() {
     }
 
     loadInventory();
-  }, [page, limit, search, category, storeId]);
+  }, [page, limit, debouncedSearch, category, storeId]);
 
   // --------------------------------------------------
   // Dynamic Categories and Stores
@@ -158,13 +177,10 @@ export default function Inventory() {
 
       return {
         ...item,
-
         stock,
         demand,
         price,
-
         status: getStatus(stock, demand),
-
         stockValue: stock * price,
       };
     });
@@ -558,6 +574,7 @@ export default function Inventory() {
               type="button"
               onClick={() => {
                 setSearch("");
+                setDebouncedSearch("");
                 setCategory("All");
                 setStoreId("All");
                 setStatus("All");
@@ -574,8 +591,6 @@ export default function Inventory() {
       {/* Table */}
 
       <div className="overflow-hidden border border-[#dfe3e8] bg-white">
-        {/* Table heading */}
-
         <div className="flex flex-col justify-between gap-2 border-b border-[#e3e6eb] px-4 py-3.5 sm:flex-row sm:items-center">
           <div>
             <h2 className="text-[13px] font-semibold text-[#172033]">
@@ -591,8 +606,6 @@ export default function Inventory() {
             Page {page} of {totalPages}
           </div>
         </div>
-
-        {/* Horizontal table scroll */}
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1250px] border-collapse text-left">
